@@ -37,6 +37,12 @@ jobs:
             build/
   deploy:
     needs: build
+    # if: always() # Ensure deploy runs even if build fails
+    # if: always() == false # Ensure deploy runs only if build succeeds
+    # if: ${{ always() && github.event_name == 'push' && needs.build.result == 'success' }} # Ensure deploy runs only on push events and if build succeeds
+    # if: github.event_name == 'push' # Only run deploy on push events
+    # if: failure() == false # Only run deploy if build succeeds
+    # if: ${{ always() && github.event_name == 'push' && failure() == false }}
     name: Deploy Stage for CI
     runs-on: ubuntu-latest
     steps:
