@@ -1,0 +1,470 @@
+GITHUB ACTIONS — NPM DEPENDENCY CACHING
+==========================================
+
+1. WHAT IS CACHING IN CI?
+--------------------------
+
+Every GitHub Actions job normally runs on a fresh runner.
+
+Without caching:
+
+    GitHub Actions Runner
+            ↓
+         npm ci
+            ↓
+      npm Registry
+            ↓
+     Download packages
+            ↓
+       node_modules
+            ↓
+         npm test
+
+If the same workflow runs again, the runner is fresh and npm may download
+the same packages again.
+
+Caching allows reusable package data from previous runs to be restored,
+reducing repeated downloads and improving CI speed.
+
+
+2. NPM CACHING IN GITHUB ACTIONS
+--------------------------------
+
+Example:
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: "npm"
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run tests
+      run: npm test
+
+The important setting is:
+
+    cache: "npm"
+
+This tells actions/setup-node to enable caching for npm's package cache.
+
+
+3. WHAT EXACTLY GETS CACHED?
+----------------------------
+
+A common misunderstanding is:
+
+    "Does GitHub Actions cache node_modules?"
+
+No.
+
+    cache: "npm"
+
+does NOT cache the project's node_modules directory.
+
+Instead, it caches npm's package download/cache data.
+
+On a typical Linux environment, npm's cache is under:
+
+    ~/.npm
+
+Conceptually:
+
+    npm Registry
+          ↓
+    Downloaded package data
+          ↓
+        ~/.npm
+       npm cache
+
+
+4. NPM CACHE VS node_modules
+----------------------------
+
++----------------------+-----------------------------------+--------------------+
+| Item                 | Purpose                           | Cached by npm?     |
++----------------------+-----------------------------------+--------------------+
+| npm cache (~/.npm)   | Reusable downloaded package data | Yes                |
+| node_modules/        | Installed project dependencies   | No                 |
+| package-lock.json    | Locks dependency versions        | No                 |
++----------------------+-----------------------------------+--------------------+
+
+Think of it like this:
+
+    npm cache
+        =
+    warehouse of downloaded packages
+
+    node_modules
+        =
+    packages installed into the current project
+
+
+5. WHAT HAPPENS WITHOUT CACHING?
+--------------------------------
+
+CI Run #1:
+
+    Fresh Runner
+         ↓
+       npm ci
+         ↓
+      Internet
+         ↓
+    Download packages
+         ↓
+     node_modules
+         ↓
+       npm test
+
+CI Run #2:
+
+    Fresh Runner
+         ↓
+       npm ci
+         ↓
+      Internet
+         ↓
+    Download packages AGAIN
+         ↓
+     node_modules
+         ↓
+       npm test
+
+The same dependencies may be downloaded repeatedly.
+
+
+6. WHAT HAPPENS WITH NPM CACHING?
+---------------------------------
+
+First run:
+
+    Fresh Runner
+         ↓
+       npm ci
+         ↓
+    Download packages
+         ↓
+    npm cache (~/.npm)
+         ↓
+     node_modules
+         ↓
+       npm test
+
+Later run:
+
+    Fresh Runner
+         ↓
+    Restore GitHub Actions cache
+         ↓
+    npm cache (~/.npm)
+         ↓
+       npm ci
+         ↓
+     node_modules
+         ↓
+       npm test
+
+The cache allows npm to reuse package data that has already been downloaded.
+
+
+7. WHY DOES npm ci STILL RUN?
+-----------------------------
+
+This is one of the most important concepts.
+
+Caching the npm download cache is NOT the same as caching node_modules.
+
+The GitHub Actions runner is still fresh.
+
+Therefore, the current job still needs:
+
+    npm ci
+
+to install the dependencies into:
+
+    node_modules/
+
+The flow is:
+
+    GitHub Actions Cache
+            ↓
+          ~/.npm
+            ↓
+          npm ci
+            ↓
+       node_modules
+            ↓
+          npm test
+
+
+8. HOW DOES GITHUB KNOW WHEN TO REUSE THE CACHE?
+-------------------------------------------------
+
+GitHub Actions needs a cache key to determine whether an existing cache
+can be restored.
+
+For npm, actions/setup-node uses the dependency lock file when generating
+the cache key.
+
+Conceptually:
+
+    package-lock.json
+           ↓
+      Hash lockfile
+           ↓
+       Cache key
+           ↓
+       npm cache
+
+
+9. WHY DOES package-lock.json MATTER?
+--------------------------------------
+
+package-lock.json records the resolved dependency tree and versions.
+
+Suppose:
+
+    Old package-lock.json
+            ↓
+         Hash A
+            ↓
+         Cache A
+
+After installing a new dependency:
+
+    New package-lock.json
+            ↓
+         Hash B
+            ↓
+         Cache B
+
+This allows different dependency states to use different cache keys.
+
+
+10. EXAMPLE: CODE CHANGE WITHOUT DEPENDENCY CHANGE
+---------------------------------------------------
+
+Suppose you only change application code:
+
+    console.log("Hello");
+
+and package-lock.json does not change.
+
+Conceptually:
+
+    Code change
+         ↓
+    package-lock.json unchanged
+         ↓
+      Same cache key
+         ↓
+    Restore npm cache
+         ↓
+       npm ci
+         ↓
+       npm test
+
+The existing dependency-related cache can potentially be reused.
+
+
+11. EXAMPLE: DEPENDENCY CHANGE
+------------------------------
+
+Suppose you run:
+
+    npm install redis
+
+Now:
+
+    package.json       → changed
+    package-lock.json  → changed
+
+Conceptually:
+
+    npm install redis
+           ↓
+    package-lock.json changes
+           ↓
+       New cache key
+           ↓
+     New/updated cache
+
+
+12. WHY USE npm ci IN CI?
+-------------------------
+
+npm ci is designed for clean and reproducible installations in CI
+environments.
+
+Typical flow:
+
+    package.json + package-lock.json
+                ↓
+              npm ci
+                ↓
+           node_modules
+                ↓
+              tests
+
+The npm cache makes obtaining package data faster, while npm ci still
+performs the installation for the current runner.
+
+
+13. COMPLETE GITHUB ACTIONS EXAMPLE
+-----------------------------------
+
+    name: Ci-docker-ghcr-push
+
+    on:
+      push:
+        branches: [main]
+      pull_request:
+        branches: [main]
+
+    permissions:
+      contents: read
+      packages: write
+
+    jobs:
+      test:
+        name: Test Stage for CI
+        runs-on: ubuntu-latest
+
+        steps:
+          - uses: actions/checkout@v4
+
+          - name: Set up Node.js
+            uses: actions/setup-node@v4
+            with:
+              node-version: "22"
+              cache: "npm"
+
+          - name: Install dependencies
+            run: npm ci
+
+          - name: Run tests
+            run: npm test
+
+
+14. NPM CACHING VS DOCKER LAYER CACHING
+---------------------------------------
+
+These are two different caching mechanisms.
+
+A) GitHub Actions npm cache
+
+    cache: "npm"
+
+Purpose:
+
+    Speeds up npm dependency downloads.
+
+It mainly helps:
+
+    npm ci
+
+
+B) Docker layer cache
+
+Docker can cache layers created during:
+
+    docker build
+
+For example:
+
+    COPY package*.json ./
+    RUN npm ci
+
+If the files used by a Docker layer have not changed, Docker may reuse
+that previously built layer instead of executing the command again.
+
+Conceptually:
+
+    GitHub Actions
+          │
+          ├── npm cache
+          │      ↓
+          │   Speeds up npm package downloads
+          │
+          └── Docker layer cache
+                 ↓
+              Speeds up docker build
+
+
+15. IMPORTANT DISTINCTION
+-------------------------
+
+Remember:
+
+    cache: "npm"
+            ↓
+    Caches npm's package download/cache data
+            ↓
+    Usually ~/.npm
+            ↓
+    Helps npm ci obtain packages faster
+            ↓
+    Does NOT cache node_modules
+
+
+16. MENTAL MODEL
+----------------
+
+    GitHub Repository
+            ↓
+      Checkout source
+            ↓
+     Restore npm cache
+            ↓
+          npm ci
+            ↓
+       node_modules
+            ↓
+         npm test
+
+
+17. KEY TAKEAWAY
+----------------
+
+One-line definition:
+
+    cache: "npm" in actions/setup-node caches npm's package download
+    cache so subsequent GitHub Actions runs can reuse previously
+    downloaded dependency data.
+
+It does NOT cache node_modules.
+
+Therefore:
+
+    cache: "npm"
+          +
+        npm ci
+          =
+    Faster dependency installation on CI runs.
+
+
+18. QUICK REVISION
+------------------
+
+1. GitHub Actions runners are normally fresh for each job.
+
+2. cache: "npm" enables npm dependency caching through
+   actions/setup-node.
+
+3. The npm cache is typically under ~/.npm.
+
+4. cache: "npm" does NOT cache node_modules.
+
+5. npm ci still runs and creates/installs dependencies into node_modules.
+
+6. package-lock.json is important for identifying the dependency state
+   used for caching.
+
+7. npm caching and Docker layer caching are different concepts.
+
+8. npm caching mainly reduces repeated package downloads.
+
+9. Docker layer caching can reduce repeated Docker build work.
