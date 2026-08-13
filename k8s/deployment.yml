@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cicd-app
+  labels:
+    app: cicd-app
+spec:
+  replicas: 2 # run 2 pods for a real rolling update
+  selector:
+    matchLabels:
+      app: cicd-app
+  template:
+    metadata:
+      labels:
+        app: cicd-app
+    spec:
+      containers:
+        - name: cicd-app
+          image: ghcr.io/anmolwasson/cicd:latest # placeholder; CI overrides with the SHA
+          ports:
+            - containerPort: 3000
+          readinessProbe: # gates the rollout — pod isn't "ready" until this passes
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          livenessProbe: # restarts the pod if it goes unhealthy later
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10

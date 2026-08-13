@@ -1,0 +1,60 @@
+name: CI-artifacts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build Stage for CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm" # ← this one line enables caching
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build artifacts
+        run: |
+          mkdir -p dist
+          echo "This is a sample artifact file." > dist/sample-artifact.txt
+          mkdir -p build
+          echo "This is another sample artifact file." > build/sample-build-artifact.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            dist/
+            build/
+  deploy:
+    needs: build
+    # if: always() # Ensure deploy runs even if build fails
+    # if: always() == false # Ensure deploy runs only if build succeeds
+    # if: ${{ always() && github.event_name == 'push' && needs.build.result == 'success' }} # Ensure deploy runs only on push events and if build succeeds
+    # if: github.event_name == 'push' # Only run deploy on push events
+    # if: failure() == false # Only run deploy if build succeeds
+    # if: ${{ always() && github.event_name == 'push' && failure() == false }}
+    name: Deploy Stage for CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: artifacts/
+
+      - name: List downloaded artifacts
+        run: |
+          ls -l artifacts/dist
+          ls -l artifacts/build
+          cat artifacts/dist/sample-artifact.txt
+          cat artifacts/build/sample-build-artifact.txt
